@@ -53,7 +53,12 @@ console.log("End date", format(monthEnd, dateFormat));
 
 const workbook = new ExcelJS.Workbook();
 
-const fetchIssuesForAssignee = async (assignee, startDate, endDate) => {
+const fetchIssuesForAssignee = async (
+  assignee,
+  startDate,
+  endDate,
+  nextMonthFirstDay
+) => {
   const config = {
     method: "get",
     maxBodyLength: Infinity,
@@ -66,11 +71,16 @@ const fetchIssuesForAssignee = async (assignee, startDate, endDate) => {
     )}") AND status was not in (${jiraStatus}) before "${format(
       startDate,
       dateFormat
+    )}" AND status was in (${jiraStatus}) before "${format(
+      nextMonthFirstDay,
+      dateFormat
     )}" AND statusCategory = ${jiraStatusCategory} ORDER BY ${jiraOrderBy} ${jiraOrderDirection}`,
     headers: {
       Authorization: `Bearer ${jiraAccessToken}`,
     },
   };
+
+  console.log(config.url);
 
   try {
     const response = await axios.request(config);
@@ -229,13 +239,22 @@ const processAssignees = async () => {
   for (let i = 0; i < totalMonths; i++) {
     const startDate = addMonths(monthStart, i);
     const endDate = endOfMonth(startDate);
+    const nextMonthFirstDay = getNextMonthFirstDay(endDate);
 
     const issuesByAssignee = await Promise.all(
       assigneeNames.map(async (assignee) => {
+        console.log(`Retrieving information for dates:
+          Assignee: ${assignee}
+          Start Date: ${format(startDate, "yyyy-MM-dd HH:mm")}
+          End Date: ${format(endDate, "yyyy-MM-dd HH:mm")}
+          Next Month First Day: ${format(nextMonthFirstDay, "yyyy-MM-dd HH:mm")}
+        `);
+
         const issues = await fetchIssuesForAssignee(
           assignee,
           startDate,
-          endDate
+          endDate,
+          nextMonthFirstDay
         );
         return { assignee, issues };
       })
@@ -263,6 +282,16 @@ const processAssignees = async () => {
   );
   console.log("Data exported to Excel file successfully.");
 };
+
+function getNextMonthFirstDay(date) {
+  let newDate = new Date(date);
+
+  // Reset first to prevent adding 2 months if the day does not exist in the following month
+  newDate.setDate(1); // Set to the first day of the month
+  newDate.setMonth(newDate.getMonth() + 1); // Add one month
+
+  return newDate;
+}
 
 // main
 processAssignees();
