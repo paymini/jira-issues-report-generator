@@ -1,7 +1,16 @@
 require("dotenv").config();
 const axios = require("axios");
 const ExcelJS = require("exceljs");
-const { startOfMonth, endOfMonth, format } = require("date-fns");
+const {
+  startOfMonth,
+  endOfMonth,
+  format,
+  addMonths,
+  differenceInMonths,
+  parseISO,
+  parse,
+  isValid,
+} = require("date-fns");
 
 const jiraAccessToken = process.env.JIRA_ACCESS_TOKEN;
 const assigneeNames = process.env.JIRA_TEAM_MEMBERS.split(",");
@@ -12,27 +21,51 @@ const jiraStatusCategory = process.env.JIRA_STATUS_CATEGORY;
 const jiraOrderBy = process.env.JIRA_ORDER_BY;
 const jiraOrderDirection = process.env.JIRA_ORDER_DIRECTION;
 const jiraTeamName = process.env.JIRA_TEAM_NAME;
+const jiraStartMonth = process.env.JIRA_START_MONTH;
+const jiraEndMonth = process.env.JIRA_END_MONTH;
+const overrideExcelDateFormat = process.env.EXCEL_DATE_FORMAT;
 
 const currentDate = new Date();
-console.log("currentDate", format(currentDate, "yyyy-MM-dd"));
-const monthStart = startOfMonth(currentDate);
-const monthEnd = endOfMonth(currentDate);
+
+const parseDateOrMonth = (dateStr) => {
+  let date = parseISO(dateStr);
+  if (!isValid(date)) {
+    date = parse(dateStr, "yyyy-MM", new Date());
+  }
+  return date;
+};
+
+const monthStart = jiraStartMonth
+  ? startOfMonth(parseDateOrMonth(jiraStartMonth))
+  : startOfMonth(currentDate);
+const monthEnd = jiraEndMonth
+  ? endOfMonth(parseDateOrMonth(jiraEndMonth))
+  : endOfMonth(currentDate);
+
+const dateFormat = "yyyy-MM-dd";
+const excelDateFormat = overrideExcelDateFormat + " HH:mm";
+
+console.log(
+  "Querying [" + assigneeNames.length + "] employees for the following dates:"
+);
+console.log("Start date", format(monthStart, dateFormat));
+console.log("End date", format(monthEnd, dateFormat));
 
 const workbook = new ExcelJS.Workbook();
 
-const fetchIssuesForAssignee = async (assignee) => {
+const fetchIssuesForAssignee = async (assignee, startDate, endDate) => {
   const config = {
     method: "get",
     maxBodyLength: Infinity,
-    url: `${jiraUrl}/rest/api/2/search?jql=project in (${jiraProjectName}) AND assignee was in (${assignee}) during ("${format(
-      monthStart,
-      "yyyy-MM-dd"
+    url: `${jiraUrl}/rest/api/2/search?jql=assignee was in (${assignee}) during ("${format(
+      startDate,
+      dateFormat
     )}", "${format(
-      monthEnd,
-      "yyyy-MM-dd"
+      endDate,
+      dateFormat
     )}") AND status was not in (${jiraStatus}) before "${format(
-      monthStart,
-      "yyyy-MM-dd"
+      startDate,
+      dateFormat
     )}" AND statusCategory = ${jiraStatusCategory} ORDER BY ${jiraOrderBy} ${jiraOrderDirection}`,
     headers: {
       Authorization: `Bearer ${jiraAccessToken}`,
@@ -90,8 +123,8 @@ const applyHeaderStyles = (worksheet, headers) => {
   headerRow.commit();
 };
 
-const createSharedWorksheet = async (issuesByAssignee) => {
-  const worksheet = workbook.addWorksheet("All Issues");
+const createWorksheetForMonth = async (issuesByAssignee, month, year) => {
+  const worksheet = workbook.addWorksheet(`${month}-${year}`);
 
   const headers = [
     { header: "Project", key: "project", width: 20 },
@@ -119,18 +152,18 @@ const createSharedWorksheet = async (issuesByAssignee) => {
   issuesByAssignee.forEach((assigneeIssues, index) => {
     assigneeIssues.issues.forEach((issue) => {
       const row = worksheet.addRow({
-        project: issue.fields.project.key,
+        project: jiraProjectName,
         assignee: assigneeIssues.assignee,
         key: issue.key,
         issue_id: issue.id,
         parent_id: issue.fields.parent ? issue.fields.parent.id : "",
         summary: issue.fields.summary,
         status: issue.fields.status.name,
-        created: format(new Date(issue.fields.created), "yyyy-MM-dd HH:mm"),
-        updated: format(new Date(issue.fields.updated), "yyyy-MM-dd HH:mm"),
-        month: format(currentDate, "MMMM"),
-        year: format(currentDate, "yyyy"),
-        number_of_task: issue.fields.subtasks?.length || 1,
+        created: format(new Date(issue.fields.created), excelDateFormat),
+        updated: format(new Date(issue.fields.updated), excelDateFormat),
+        month: month,
+        year: year,
+        number_of_task: 1,
         issuetype: issue.fields.issuetype.name,
         resolution: issue.fields.resolution?.name || "Unresolved",
       });
@@ -191,17 +224,42 @@ const createSharedWorksheet = async (issuesByAssignee) => {
 };
 
 const processAssignees = async () => {
-  const issuesByAssignee = await Promise.all(
-    assigneeNames.map(async (assignee) => {
-      const issues = await fetchIssuesForAssignee(assignee);
-      return { assignee, issues };
-    })
-  );
+  const totalMonths = differenceInMonths(monthEnd, monthStart) + 1;
 
-  await createSharedWorksheet(issuesByAssignee);
+  for (let i = 0; i < totalMonths; i++) {
+    const startDate = addMonths(monthStart, i);
+    const endDate = endOfMonth(startDate);
+
+    const issuesByAssignee = await Promise.all(
+      assigneeNames.map(async (assignee) => {
+        const issues = await fetchIssuesForAssignee(
+          assignee,
+          startDate,
+          endDate
+        );
+        return { assignee, issues };
+      })
+    );
+
+    // Filter out empty issues
+    const nonEmptyIssuesByAssignee = issuesByAssignee.filter(
+      (assigneeIssues) => assigneeIssues.issues.length > 0
+    );
+
+    if (nonEmptyIssuesByAssignee.length > 0) {
+      await createWorksheetForMonth(
+        nonEmptyIssuesByAssignee,
+        format(startDate, "MMMM"),
+        format(startDate, "yyyy")
+      );
+    }
+  }
 
   await workbook.xlsx.writeFile(
-    `${jiraTeamName}_Report_${format(currentDate, "yyyy-MM-dd")}.xlsx`
+    `${jiraTeamName}_Report_${format(monthStart, dateFormat)}_${format(
+      monthEnd,
+      dateFormat
+    )}.xlsx`
   );
   console.log("Data exported to Excel file successfully.");
 };
