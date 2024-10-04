@@ -53,6 +53,31 @@ console.log("End date", format(monthEnd, dateFormat));
 
 const workbook = new ExcelJS.Workbook();
 
+// const fetchIssuesForAssignee = async (
+//   assignee,
+//   startDate,
+//   endDate,
+//   nextMonthFirstDay
+// ) => {
+//   const config = {
+//     method: "get",
+//     maxBodyLength: Infinity,
+//     url: `${jiraUrl}/rest/api/2/search?jql=assignee was in (${assignee}) during ("${format(
+//       startDate,
+//       dateFormat
+//     )}", "${format(endDate, dateFormat)}") AND status was not in (${jiraStatus}) before "${format(
+//       startDate,
+//       dateFormat
+//     )}" AND status was in (${jiraStatus}) before "${format(
+//       nextMonthFirstDay,
+//       dateFormat
+//     )}" AND statusCategory = ${jiraStatusCategory} ORDER BY ${jiraOrderBy} ${jiraOrderDirection}`,
+//     headers: {
+//       Authorization: `Bearer ${jiraAccessToken}`,
+//     },
+//   };
+
+
 const fetchIssuesForAssignee = async (
   assignee,
   startDate,
@@ -65,20 +90,13 @@ const fetchIssuesForAssignee = async (
     url: `${jiraUrl}/rest/api/2/search?jql=assignee was in (${assignee}) during ("${format(
       startDate,
       dateFormat
-    )}", "${format(
-      endDate,
-      dateFormat
-    )}") AND status was not in (${jiraStatus}) before "${format(
-      startDate,
-      dateFormat
-    )}" AND status was in (${jiraStatus}) before "${format(
-      nextMonthFirstDay,
-      dateFormat
-    )}" AND statusCategory = ${jiraStatusCategory} ORDER BY ${jiraOrderBy} ${jiraOrderDirection}`,
+    )}", "${format(endDate, dateFormat)}")`,
     headers: {
       Authorization: `Bearer ${jiraAccessToken}`,
     },
   };
+
+
 
   console.log(config.url);
 
